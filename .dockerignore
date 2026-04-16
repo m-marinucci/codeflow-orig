@@ -1,0 +1,10 @@
+.git
+.gitignore
+.DS_Store
+.env
+.venv
+node_modules
+tests
+README.md
+codeflow-social.png
+screenshot.png

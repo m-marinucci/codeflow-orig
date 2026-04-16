@@ -1,0 +1,12 @@
+services:
+  codeflow:
+    image: nginx:1.27-alpine
+    container_name: codeflow
+    restart: unless-stopped
+    ports:
+      - "30146:80"
+    volumes:
+      - /mnt/apps/devtools/codeflow/index.html:/usr/share/nginx/html/index.html:ro
+      - /mnt/apps/devtools/codeflow/src:/usr/share/nginx/html/src:ro
+      - /mnt/apps/devtools/codeflow/deploy/truenas/config.js:/usr/share/nginx/html/config.js:ro
+      - /mnt/apps/devtools/codeflow/deploy/truenas/nginx.conf:/etc/nginx/conf.d/default.conf:ro

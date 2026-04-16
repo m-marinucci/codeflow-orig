@@ -1,0 +1,5 @@
+window.CODEFLOW_CONFIG = {
+  forgejoBaseUrl: '__FORGEJO_BASE_URL__',
+  forgejoApiBaseUrl: '__FORGEJO_API_BASE_URL__',
+  forgejoProxyAuth: __FORGEJO_PROXY_AUTH__,
+};

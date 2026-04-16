@@ -4,17 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CodeFlow — Open Source Architecture Intelligence</title>
-    <meta name="description" content="Visualize any GitHub repository's architecture in seconds. See dependencies, blast radius, code ownership, security issues, and design patterns. No installation required.">
-    <meta name="keywords" content="code visualization, architecture, github, dependency graph, blast radius, code analysis, open source">
+    <meta name="description" content="Visualize Forgejo repositories or local codebases in seconds. See dependencies, blast radius, code ownership, security issues, and design patterns. No installation required.">
+    <meta name="keywords" content="code visualization, architecture, forgejo, dependency graph, blast radius, code analysis, open source">
     <meta name="author" content="CodeFlow">
     <meta name="robots" content="index, follow">
     <meta property="og:title" content="CodeFlow — Visualize Your Codebase Architecture">
-    <meta property="og:description" content="Turn any GitHub repo into an interactive architecture map in seconds. Zero setup, privacy-first, runs in your browser.">
+    <meta property="og:description" content="Turn Forgejo repos or local folders into an interactive architecture map in seconds. Zero setup, privacy-first, runs in your browser.">
     <meta property="og:type" content="website">
     <meta property="og:image" content="https://via.placeholder.com/1200x630?text=CodeFlow">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="CodeFlow — Visualize Your Codebase Architecture">
-    <meta name="twitter:description" content="Turn any GitHub repo into an interactive architecture map in seconds. Zero setup, privacy-first.">
+    <meta name="twitter:description" content="Turn Forgejo repos or local folders into an interactive architecture map in seconds. Zero setup, privacy-first.">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -23,7 +23,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3-sankey/0.12.3/d3-sankey.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/acorn/8.11.3/acorn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/web-tree-sitter@0.25.10/tree-sitter.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsrsasign/11.1.0/jsrsasign-all-min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
     <style>
 :root{--bg0:#0a0a0c;--bg1:#0f0f12;--bg2:#161619;--bg3:#1c1c21;--bg4:#252529;--hover:#2a2a30;--border:#2d2d35;--border2:#222228;--t0:#f0f0f2;--t1:#c8c8cd;--t2:#8b8b95;--t3:#5c5c66;--acc:#00ff9d;--acc2:#00cc7d;--accbg:rgba(0,255,157,0.08);--blue:#4d9fff;--purple:#a78bfa;--orange:#ff9f43;--red:#ff5f5f;--cyan:#22d3ee;--pink:#ec4899;--green:#22c55e}
@@ -35,7 +34,7 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 .logo{display:flex;align-items:center;gap:10px;cursor:pointer}
 .logo-mark{width:28px;height:28px;background:linear-gradient(135deg,var(--acc),var(--cyan));border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px}
 .logo-text{font-size:14px;font-weight:700;color:var(--acc)}
-.repo-input-group{display:flex;gap:8px;flex:1;max-width:500px}
+.repo-input-group{display:flex;gap:8px;flex:1;max-width:860px}
 .repo-input{flex:1;padding:6px 12px;background:var(--bg0);border:1px solid var(--border);border-radius:6px;color:var(--t0);font-family:inherit;font-size:11px}
 .repo-input:focus{outline:none;border-color:var(--acc)}
 .topbar-actions{display:flex;gap:6px;margin-left:auto}
@@ -427,6 +426,8 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 </head>
 <body>
 <div id="root"></div>
+<script src="./config.js"></script>
+<script src="./src/forgejo-provider.js"></script>
 <script type="text/babel">
 const{useState,useEffect,useRef,useMemo,useCallback}=React;
 const COLORS=['#4d9fff','#a78bfa','#22d3ee','#00ff9d','#ff9f43','#ec4899','#ff5f5f','#84cc16'];
@@ -1810,130 +1811,47 @@ const Parser={
     }
 };
 
-var GitHub={
+var Forgejo={
     token:null,
-    appId:null,
-    privateKey:null,
-    installationToken:null,
-    installationTokenExpiry:null,
-    rateLimit:{remaining:60,limit:60,reset:0},
-    
-    // Generate JWT for GitHub App authentication
-    generateJWT:function(){
-        if(!this.appId||!this.privateKey)return null;
-        try{
-            var now=Math.floor(Date.now()/1000);
-            var payload={
-                iat:now-60,// Issued at (60 seconds in past to account for clock drift)
-                exp:now+600,// Expires in 10 minutes (max allowed)
-                iss:this.appId
-            };
-            var header={alg:'RS256',typ:'JWT'};
-            var sHeader=JSON.stringify(header);
-            var sPayload=JSON.stringify(payload);
-            var jwt=KJUR.jws.JWS.sign('RS256',sHeader,sPayload,this.privateKey);
-            return jwt;
-        }catch(e){
-            console.error('JWT generation failed:',e);
-            return null;
+    config:null,
+
+    setConfig:function(config){
+        this.config=config;
+    },
+
+    buildApiUrl:function(path){
+        if(!this.config||!this.config.apiBaseUrl){
+            throw new Error('Forgejo base URL not configured');
         }
+        return this.config.apiBaseUrl+path;
     },
-    
-    // Get installations for the GitHub App
-    getInstallations:function(){
-        var jwt=this.generateJWT();
-        if(!jwt)return Promise.reject(new Error('Failed to generate JWT'));
-        return fetch('https://api.github.com/app/installations',{
-            headers:{
-                'Accept':'application/vnd.github.v3+json',
-                'Authorization':'Bearer '+jwt
+
+    encodePath:function(path){
+        return path.split('/').map(function(part){return encodeURIComponent(part);}).join('/');
+    },
+
+    fetch:function(path){
+        var h={'Accept':'application/json'};
+        if(this.token)h['Authorization']='token '+this.token;
+        return fetch(this.buildApiUrl(path),{headers:h}).then(function(r){
+            if(!r.ok){
+                var hasAuth=!!h['Authorization'];
+                var hasProxyAuth=!!(this.config&&this.config.proxyAuth);
+                if(window.ForgejoProvider&&window.ForgejoProvider.describeApiError){
+                    throw new Error(window.ForgejoProvider.describeApiError(r.status,hasAuth,hasProxyAuth));
+                }
+                throw new Error('Forgejo API error '+r.status);
             }
-        }).then(function(r){
-            if(!r.ok)throw new Error(r.status===401?'Invalid App credentials':'Error '+r.status);
             return r.json();
-        });
-    },
-    
-    // Get installation access token
-    getInstallationToken:function(installationId){
-        var self=this;
-        var jwt=this.generateJWT();
-        if(!jwt)return Promise.reject(new Error('Failed to generate JWT'));
-        return fetch('https://api.github.com/app/installations/'+installationId+'/access_tokens',{
-            method:'POST',
-            headers:{
-                'Accept':'application/vnd.github.v3+json',
-                'Authorization':'Bearer '+jwt
-            }
-        }).then(function(r){
-            if(!r.ok)throw new Error(r.status===401?'Invalid App credentials':r.status===404?'Installation not found':'Error '+r.status);
-            return r.json();
-        }).then(function(data){
-            self.installationToken=data.token;
-            self.installationTokenExpiry=new Date(data.expires_at).getTime();
-            self.token=data.token;// Use installation token for API calls
-            return data.token;
-        });
-    },
-    
-    // Authenticate with GitHub App for a specific repo
-    authenticateApp:function(owner,repo){
-        var self=this;
-        // Check if we have a valid installation token
-        if(this.installationToken&&this.installationTokenExpiry&&Date.now()<this.installationTokenExpiry-60000){
-            this.token=this.installationToken;
-            return Promise.resolve(this.installationToken);
-        }
-        // Get installations and find the one for this repo
-        return this.getInstallations().then(function(installations){
-            if(!installations||!installations.length){
-                throw new Error('No installations found for this GitHub App');
-            }
-            // Try to find installation that has access to this repo
-            // For simplicity, we'll use the first installation
-            // In production, you'd want to match by account/owner
-            var installation=installations.find(function(i){
-                return i.account&&i.account.login&&i.account.login.toLowerCase()===owner.toLowerCase();
-            })||installations[0];
-            return self.getInstallationToken(installation.id);
-        });
-    },
-    
-    fetch:function(url){
-        var self=this;
-        var h={'Accept':'application/vnd.github.v3+json'};
-        if(this.token)h['Authorization']='Bearer '+this.token;
-        return fetch(url,{headers:h}).then(function(r){
-            // Track rate limit from headers
-            var rem=r.headers.get('x-ratelimit-remaining');
-            var lim=r.headers.get('x-ratelimit-limit');
-            var rst=r.headers.get('x-ratelimit-reset');
-            if(rem!==null)self.rateLimit.remaining=parseInt(rem,10);
-            if(lim!==null)self.rateLimit.limit=parseInt(lim,10);
-            if(rst!==null)self.rateLimit.reset=parseInt(rst,10);
-            if(!r.ok)throw new Error(r.status===401?'Invalid token':r.status===403?'Rate limited - add a GitHub token for 5000 req/hour':r.status===404?'Repository not found':r.status===429?'Rate limited (429) - add a GitHub token':'Error '+r.status);
-            return r.json();
-        });
-    },
-    getRateLimit:function(){
-        var self=this;
-        var h={'Accept':'application/vnd.github.v3+json'};
-        if(this.token)h['Authorization']='Bearer '+this.token;
-        return fetch('https://api.github.com/rate_limit',{headers:h}).then(function(r){return r.json();}).then(function(d){
-            if(d.resources&&d.resources.core){
-                self.rateLimit.remaining=d.resources.core.remaining;
-                self.rateLimit.limit=d.resources.core.limit;
-                self.rateLimit.reset=d.resources.core.reset;
-            }
-            return self.rateLimit;
-        }).catch(function(){return self.rateLimit;});
+        }.bind(this));
     },
     getFile:function(o,r,p){
-        return this.fetch('https://api.github.com/repos/'+o+'/'+r+'/contents/'+p).then(function(d){return d.content?atob(d.content):null;}).catch(function(){return null;});
+        var path='/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/contents/'+this.encodePath(p);
+        return this.fetch(path).then(function(d){return d.content?atob(d.content):null;}).catch(function(){return null;});
     },
     getCommits:function(o,r,path,limit){
-        if(this.rateLimit.remaining<20&&!this.token)return Promise.resolve([]);// Skip when rate limited
-        return this.fetch('https://api.github.com/repos/'+o+'/'+r+'/commits?per_page='+(limit||30)+(path?'&path='+path:'')).catch(function(){return[];});
+        var query='?limit='+(limit||30)+(path?'&path='+encodeURIComponent(path):'');
+        return this.fetch('/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/commits'+query).catch(function(){return[];});
     },
     getBlame:function(o,r,path){
         return this.getCommits(o,r,path,50).then(function(commits){
@@ -1944,8 +1862,9 @@ var GitHub={
     },
     getPR:function(o,r,prNum){
         var self=this;
-        return this.fetch('https://api.github.com/repos/'+o+'/'+r+'/pulls/'+prNum).then(function(pr){
-            return self.fetch('https://api.github.com/repos/'+o+'/'+r+'/pulls/'+prNum+'/files').then(function(files){
+        var prefix='/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/pulls/'+prNum;
+        return this.fetch(prefix).then(function(pr){
+            return self.fetch(prefix+'/files').then(function(files){
                 pr.files=files;return pr;
             });
         }).catch(function(){return null;});
@@ -1955,11 +1874,11 @@ var GitHub={
         var self=this;
         if(cb)cb('Fetching repository tree...');
         // First get repo info to find default branch
-        return this.fetch('https://api.github.com/repos/'+o+'/'+r).then(function(repo){
+        return this.fetch('/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)).then(function(repo){
             var branch=repo.default_branch||'main';
             if(cb)cb('Loading file tree ('+branch+')...');
             // Get full tree in one request with recursive flag
-            return self.fetch('https://api.github.com/repos/'+o+'/'+r+'/git/trees/'+branch+'?recursive=1');
+            return self.fetch('/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/git/trees/'+encodeURIComponent(branch)+'?recursive=1');
         }).then(function(tree){
             if(!tree.tree)throw new Error('Invalid tree response');
             var f=[];
@@ -1982,7 +1901,8 @@ var GitHub={
     scanRecursive:function(o,r,cb,p,d){
         var self=this;p=p||'';d=d||0;
         if(d>10)return Promise.resolve([]);
-        return this.fetch('https://api.github.com/repos/'+o+'/'+r+'/contents/'+p).then(function(c){
+        var path='/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/contents/'+this.encodePath(p);
+        return this.fetch(path).then(function(c){
             var f=[];
             var promises=[];
             c.forEach(function(i){
@@ -2279,10 +2199,12 @@ function App(){
     var _a=useState(window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'),theme=_a[0],setTheme=_a[1];
     var _b=useState(''),repoUrl=_b[0],setRepoUrl=_b[1];
     var _c=useState(''),token=_c[0],setToken=_c[1];
-    var _authMethod=useState('none'),authMethod=_authMethod[0],setAuthMethod=_authMethod[1];// 'none', 'pat', 'github_app'
-    var _appId=useState(''),appId=_appId[0],setAppId=_appId[1];
-    var _privateKey=useState(''),privateKey=_privateKey[0],setPrivateKey=_privateKey[1];
-    var _showKeyModal=useState(false),showKeyModal=_showKeyModal[0],setShowKeyModal=_showKeyModal[1];
+    var runtimeConfig=window.ForgejoProvider&&window.CODEFLOW_CONFIG?window.ForgejoProvider.resolveRuntimeConfig(window.CODEFLOW_CONFIG):{forgejoBaseUrl:'',forgejoApiBaseUrl:''};
+    var initialForgejoBaseUrl=runtimeConfig.forgejoBaseUrl;
+    var forgejoApiBaseUrl=runtimeConfig.forgejoApiBaseUrl;
+    var forgejoProxyAuth=!!runtimeConfig.forgejoProxyAuth;
+    var _baseUrl=useState(initialForgejoBaseUrl),forgejoBaseUrl=_baseUrl[0],setForgejoBaseUrl=_baseUrl[1];
+    var _authMethod=useState(forgejoProxyAuth?'proxy':'none'),authMethod=_authMethod[0],setAuthMethod=_authMethod[1];// 'none', 'pat', 'proxy'
     var _d=useState(false),loading=_d[0],setLoading=_d[1];
     var _e=useState(''),progress=_e[0],setProgress=_e[1];
     var _f=useState(null),error=_f[0],setError=_f[1];
@@ -2333,96 +2255,47 @@ function App(){
     useEffect(function(){
         var params=new URLSearchParams(window.location.search);
         var repo=params.get('repo');
-        if(repo&&repo.length<200&&!repo.includes('{')&&/^[a-zA-Z0-9_.\/-]+$/.test(repo)){
+        if(repo&&repo.length<500&&!repo.includes('{')&&!repo.includes('"')){
             setRepoUrl(repo);
             setTimeout(function(){var btn=document.getElementById('analyze-btn');if(btn)btn.click();},500);
         }
     },[]);
 
     function parseUrl(url){
-        if(!url||typeof url!=='string')return null;
-        url=url.trim();
-        if(url.length>200||url.includes('{')|| url.includes('"'))return null;
-        var m=url.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)/);
-        if(m)return{owner:m[1],repo:m[2].replace(/\.git$/,'')};
-        var simple=url.match(/^([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)$/);
-        if(simple)return{owner:simple[1],repo:simple[2]};
-        return null;
+        if(!window.ForgejoProvider)return null;
+        return window.ForgejoProvider.parseRepoInput(url,forgejoBaseUrl,{apiBaseUrl:forgejoApiBaseUrl,proxyAuth:forgejoProxyAuth&&authMethod==='proxy'});
     }
 
     function analyze(){
         var p=parseUrl(repoUrl);
-        if(!p){setError('Invalid URL. Use format: owner/repo');return;}
+        if(!p){setError('Invalid repository. Use a full Forgejo URL or owner/repo with a Forgejo base URL.');return;}
         
         // Validate authentication inputs
         if(authMethod==='pat'&&!token){
-            setError('Please enter a Personal Access Token');return;
-        }
-        if(authMethod==='github_app'){
-            if(!appId){setError('Please enter the GitHub App ID');return;}
-            if(!privateKey){setError('Please set the GitHub App private key');return;}
+            setError('Please enter a Forgejo access token');return;
         }
         
-        setError(null);setData(null);setSelected(null);setBlastRadius(null);setLoading(true);setProgress('Initializing...');setFolderFilter(null);
+        setError(null);setData(null);setSelected(null);setBlastRadius(null);setLoading(true);setProgress('Initializing...');setFolderFilter(null);setLocalDirHandle(null);
         
-        // Configure GitHub authentication based on method
-        GitHub.token=null;
-        GitHub.appId=null;
-        GitHub.privateKey=null;
-        GitHub.installationToken=null;
+        // Configure Forgejo authentication based on method
+        Forgejo.token=null;
+        Forgejo.setConfig(p);
         
         if(authMethod==='pat'){
-            GitHub.token=token;
-        }else if(authMethod==='github_app'){
-            GitHub.appId=appId;
-            GitHub.privateKey=privateKey;
+            Forgejo.token=token;
         }
         
         setRepoInfo(p);
 
-        // Authentication promise - resolve immediately for no auth/PAT, authenticate for GitHub App
-        var authPromise;
-        if(authMethod==='github_app'){
-            setProgress('Authenticating with GitHub App...');
-            authPromise=GitHub.authenticateApp(p.owner,p.repo).catch(function(err){
-                throw new Error('GitHub App authentication failed: '+err.message);
-            });
-        }else{
-            authPromise=Promise.resolve();
-        }
-        
-        authPromise.then(function(){
-            setProgress('Checking rate limit...');
-            return GitHub.getRateLimit();
-        }).then(function(rl){
-            var hasAuth=!!GitHub.token||authMethod==='github_app';
-            var estimatedRequests=50;// Conservative estimate for a small-medium repo
-
-            // Warn if rate limit is very low and no authentication
-            if(!hasAuth&&rl.remaining<estimatedRequests){
-                var resetTime=new Date(rl.reset*1000).toLocaleTimeString();
-                var proceed=window.confirm(
-                    '⚠️ GitHub API Rate Limit Low\n\n'+
-                    'Remaining requests: '+rl.remaining+'/'+rl.limit+'\n'+
-                    'Resets at: '+resetTime+'\n\n'+
-                    'Without authentication, you only get 60 requests/hour.\n'+
-                    'Adding a token or GitHub App gives you 5000 requests/hour.\n\n'+
-                    'Authentication options:\n'+
-                    '• Token (PAT): GitHub Settings → Developer Settings → Personal access tokens\n'+
-                    '• GitHub App: Use App ID + Private Key for organization access\n\n'+
-                    'Continue anyway with '+rl.remaining+' requests?'
-                );
-                if(!proceed){setLoading(false);return Promise.reject('cancelled');}
-            }
-
+        Promise.resolve().then(function(){
             setProgress('Scanning repository...');
-            return GitHub.scan(p.owner,p.repo,setProgress);
+            return Forgejo.scan(p.owner,p.repo,setProgress);
         }).then(function(files){
             if(!files)return;// Cancelled
             if(!files.length)throw new Error('No code files found');
             var SOFT_LIMIT=300,HARD_LIMIT=750;
             if(files.length>SOFT_LIMIT&&files.length<=HARD_LIMIT){
-                var proceed=window.confirm('This repository has '+files.length+' files.\n\nAnalyzing large repos may be slow and could hit GitHub API rate limits.\n\nTip: Add a GitHub token for higher rate limits (5000/hour vs 60/hour).\n\nProceed with all '+files.length+' files?');
+                var proceed=window.confirm('This repository has '+files.length+' files.\n\nAnalyzing large repos may be slow in the browser.\n\nTip: add a Forgejo token if the repo is private or your server restricts anonymous API access.\n\nProceed with all '+files.length+' files?');
                 if(!proceed){setLoading(false);return;}
             }else if(files.length>HARD_LIMIT){
                 showNotification('Found '+files.length+' files. Limiting to '+HARD_LIMIT+' for performance.','warning');
@@ -2438,8 +2311,8 @@ function App(){
                 var isCodeFile=f.isCode!==false&&Parser.isCode(f.name);
                 if(isCodeFile){
                     Promise.all([
-                        GitHub.getFile(p.owner,p.repo,f.path),
-                        GitHub.getCommits(p.owner,p.repo,f.path,10).catch(function(){return[];})
+                        Forgejo.getFile(p.owner,p.repo,f.path),
+                        Forgejo.getCommits(p.owner,p.repo,f.path,10).catch(function(){return[];})
                     ]).then(function(results){
                         var content=results[0];
                         var commits=results[1];
@@ -2452,7 +2325,7 @@ function App(){
                         processFile(i+1);
                     }).catch(function(){processFile(i+1);});
                 }else{
-                    GitHub.getFile(p.owner,p.repo,f.path).then(function(content){
+                    Forgejo.getFile(p.owner,p.repo,f.path).then(function(content){
                         var layer=Parser.detectLayer(f.path);
                         var lines=content?content.split('\n').length:0;
                         analyzed.push({path:f.path,name:f.name,folder:f.folder,content:content||'',functions:[],lines:lines,layer:layer,churn:0,isCode:false});
@@ -2621,7 +2494,7 @@ function App(){
                 dataObj.suggestions=Parser.generateSuggestions(dataObj);
                 setData(dataObj);
                 setExpandedPaths(new Set(['']));
-                var newUrl=window.location.pathname+'?repo='+encodeURIComponent(p.owner+'/'+p.repo);
+                var newUrl=window.location.pathname+'?repo='+encodeURIComponent(p.repoUrl);
                 window.history.replaceState({},'',newUrl);
                 setLoading(false);
                 }catch(err){
@@ -2631,7 +2504,7 @@ function App(){
             }
 
             processFile(0);
-        }).catch(function(e){if(e!=='cancelled'){setError(e.message||e);setLoading(false);}});
+        }).catch(function(e){setError(e.message||e);setLoading(false);});
     }
 
     function openLocalFolder(){
@@ -2911,7 +2784,7 @@ function App(){
             setExpandedFns(new Set());
             if(repoInfo&&!localDirHandle){
                 setOwnerLoading(true);
-                GitHub.getBlame(repoInfo.owner,repoInfo.repo,path).then(function(owners){setOwnership(owners);setOwnerLoading(false);}).catch(function(){setOwnerLoading(false);});
+                Forgejo.getBlame(repoInfo.owner,repoInfo.repo,path).then(function(owners){setOwnership(owners);setOwnerLoading(false);}).catch(function(){setOwnerLoading(false);});
             }else if(localDirHandle){
                 setOwnerLoading(false);
                 setOwnership([]);
@@ -3003,7 +2876,7 @@ function App(){
                 return;
             }
         }
-        // Fetch from GitHub or local directory
+        // Fetch from Forgejo or local directory
         if(localDirHandle){
             // Read from local directory using async traversal
             (async function(){
@@ -3022,8 +2895,8 @@ function App(){
                 }
             })();
         }else{
-            // Fetch from GitHub
-            GitHub.getFile(repoInfo.owner,repoInfo.repo,path).then(function(content){
+            // Fetch from Forgejo
+            Forgejo.getFile(repoInfo.owner,repoInfo.repo,path).then(function(content){
                 if(content){
                     setFilePreview({path:path,filename:filename,content:content,line:line||null,loading:false,error:null});
                 }else{
@@ -3654,7 +3527,7 @@ function App(){
     function exportJSON(){if(!data)return;var blob=new Blob([JSON.stringify({stats:data.stats,files:data.files.map(function(f){return{path:f.path,fns:f.functions.length,layer:f.layer,lines:f.lines};}),connections:data.connections,issues:data.issues,patterns:data.patterns,security:data.securityIssues},null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='codeflow-analysis.json';a.click();}
     function generateReport(format){
         if(!data)return;
-        var repo=repoInfo?(localDirHandle?'Local Folder':repoInfo.owner+'/'+repoInfo.repo):'Unknown Repository';
+        var repo=repoInfo?(localDirHandle?'Local Folder':(repoInfo.repoUrl||repoInfo.owner+'/'+repoInfo.repo)):'Unknown Repository';
         var h=calcHealth(data);
         var report={
             repository:repo,
@@ -3885,8 +3758,8 @@ function App(){
         }
         navigator.clipboard.writeText(window.location.href).then(function(){showNotification('Link copied to clipboard!');}).catch(function(){showNotification('Failed to copy link','error');});
     }
-    function analyzePR(){if(!prUrl||!repoInfo)return;var m=prUrl.match(/\/pull\/(\d+)/);if(!m){showNotification('Invalid PR URL','error');return;}GitHub.getPR(repoInfo.owner,repoInfo.repo,m[1]).then(function(pr){if(pr)setPrData(pr);else showNotification('Could not load PR','error');});}
-    function resetAnalysis(){setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setRepoUrl('');setPrData(null);setFolderFilter(null);setLocalDirHandle(null);window.history.replaceState({},'',window.location.pathname);}
+    function analyzePR(){if(!prUrl||!repoInfo)return;var prNum=window.ForgejoProvider?window.ForgejoProvider.extractPullRequestNumber(prUrl):null;if(!prNum){showNotification('Invalid PR URL','error');return;}Forgejo.getPR(repoInfo.owner,repoInfo.repo,prNum).then(function(pr){if(pr)setPrData(pr);else showNotification('Could not load PR','error');});}
+    function resetAnalysis(){setData(null);setSelected(null);setBlastRadius(null);setOwnership(null);setRepoInfo(null);setRepoUrl('');setForgejoBaseUrl(initialForgejoBaseUrl);setPrData(null);setFolderFilter(null);setLocalDirHandle(null);window.history.replaceState({},'',window.location.pathname);}
     function filterByFolder(path){setFolderFilter(function(prev){return prev===path?null:path;});}
     var health=useMemo(function(){return calcHealth(data);},[data]);
 
@@ -3897,18 +3770,16 @@ function App(){
                 React.createElement('span',{className:'logo-text'},'CODEFLOW')
             ),
             React.createElement('div',{className:'repo-input-group'},
-                React.createElement('input',{className:'repo-input','aria-label':'Repository URL',placeholder:'owner/repo or GitHub URL',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
+                React.createElement('input',{className:'repo-input','aria-label':'Repository URL',placeholder:'Forgejo repo URL or owner/repo',value:repoUrl,onChange:function(e){setRepoUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();}}),
+                React.createElement('input',{className:'repo-input','aria-label':'Forgejo Base URL',placeholder:'Forgejo Base URL (optional for full repo URLs)',value:forgejoBaseUrl,onChange:function(e){setForgejoBaseUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{minWidth:220}}),
                 React.createElement('select',{className:'auth-select','aria-label':'Authentication Method',value:authMethod,onChange:function(e){setAuthMethod(e.target.value);}},
+                    forgejoProxyAuth&&React.createElement('option',{value:'proxy'},'Server Auth'),
                     React.createElement('option',{value:'none'},'No Auth'),
-                    React.createElement('option',{value:'pat'},'Token (PAT)'),
-                    React.createElement('option',{value:'github_app'},'GitHub App')
+                    React.createElement('option',{value:'pat'},'Token')
                 ),
                 React.createElement('div',{className:'auth-inputs'},
-                    authMethod==='pat'&&React.createElement('input',{className:'repo-input',type:'password','aria-label':'GitHub Token',placeholder:'Personal Access Token',value:token,onChange:function(e){setToken(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{minWidth:140}}),
-                    authMethod==='github_app'&&React.createElement(React.Fragment,null,
-                        React.createElement('input',{className:'repo-input','aria-label':'App ID',placeholder:'App ID',value:appId,onChange:function(e){setAppId(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{width:80}}),
-                        React.createElement('button',{className:'private-key-btn'+(privateKey?' has-key':''),'aria-label':'Set Private Key',onClick:function(){setShowKeyModal(true);},type:'button'},privateKey?'🔑 Key Set':'🔐 Private Key')
-                    )
+                    authMethod==='pat'&&React.createElement('input',{className:'repo-input',type:'password','aria-label':'Forgejo Token',placeholder:'Forgejo access token',value:token,onChange:function(e){setToken(e.target.value);},onKeyDown:function(e){if(e.key==='Enter'&&!loading)analyze();},style:{minWidth:160}}),
+                    authMethod==='proxy'&&React.createElement('div',{className:'privacy-pill',style:{display:'flex',alignItems:'center'}},'Server token')
                 ),
                 React.createElement('button',{id:'analyze-btn',className:'top-btn primary','aria-label':'Analyze repository',onClick:analyze,disabled:loading||!repoUrl},loading?'⏳':'🔍',' Analyze'),
                 React.createElement('button',{className:'top-btn','aria-label':'Open local folder',onClick:function(){openLocalFolder();},disabled:loading},'📁 Open Folder'),
@@ -3977,11 +3848,11 @@ function App(){
                         folderFilter&&React.createElement('button',{className:'top-btn',style:{width:'100%',marginTop:8},onClick:function(){setFolderFilter(null);}},'✕ Clear Filter: ',folderFilter)
                     ),
                     React.createElement('div',{className:'sidebar-scroll'},React.createElement(TreeNode,{node:data.tree,selected:selected,onSelect:selectFile,expanded:expandedPaths,toggle:togglePath,filterFolder:filterByFolder,activeFilter:folderFilter}))
-                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'🔍'),React.createElement('div',{className:'empty-title'},'No Repository'),React.createElement('div',{className:'empty-desc'},'Enter a GitHub URL or click "Open Folder" to analyze a local directory'))
+                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'🔍'),React.createElement('div',{className:'empty-title'},'No Repository'),React.createElement('div',{className:'empty-desc'},'Enter a Forgejo URL, use owner/repo with a Forgejo base URL, or open a local folder'))
             ),
             React.createElement('div',{className:'canvas-area'},
                 loading?React.createElement('div',{className:'loading'},React.createElement('div',{className:'spinner'}),React.createElement('div',{className:'loading-text'},'Analyzing...'),React.createElement('div',{className:'loading-progress'},progress)):
-                !data?React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'⚡'),React.createElement('div',{className:'empty-title'},'CodeFlow'),React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, ownership, patterns & security\n\nEnter a GitHub URL or click "Open Folder" to analyze a local directory')):
+                !data?React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'⚡'),React.createElement('div',{className:'empty-title'},'CodeFlow'),React.createElement('div',{className:'empty-desc'},'Visualize architecture, blast radius, ownership, patterns & security\n\nEnter a Forgejo URL or open a local folder to analyze a codebase')):
                 React.createElement(React.Fragment,null,
                     React.createElement('div',{className:'viz-selector'},
                         React.createElement('button',{className:'viz-selector-btn'+(graphConfig.vizType==='graph'?' active':''),onClick:function(){setGraphConfig(Object.assign({},graphConfig,{vizType:'graph'}));}},'🕸️ Graph'),
@@ -4307,7 +4178,7 @@ function App(){
                             )
                         )
                     )
-                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'📊'),React.createElement('div',{className:'empty-title'},'Analysis'),React.createElement('div',{className:'empty-desc'},'Analyze a GitHub repo or local folder to see insights'))
+                ):React.createElement('div',{className:'empty-state'},React.createElement('div',{className:'empty-icon'},'📊'),React.createElement('div',{className:'empty-title'},'Analysis'),React.createElement('div',{className:'empty-desc'},'Analyze a Forgejo repo or local folder to see insights'))
             )
         ),
         showExport&&React.createElement('div',{className:'modal-overlay',onClick:function(){setShowExport(false);}},
@@ -4337,7 +4208,7 @@ function App(){
             React.createElement('div',{className:'modal pr-modal',onClick:function(e){e.stopPropagation();}},
                 React.createElement('div',{className:'modal-header'},React.createElement('div',{className:'modal-title'},'📊 PR Impact Analyzer'),React.createElement('button',{className:'modal-close',onClick:function(){setShowPR(false);}},'×')),
                 React.createElement('div',{className:'modal-body',style:{maxHeight:'75vh',overflowY:'auto'}},
-                    React.createElement('div',{className:'form-group'},React.createElement('label',{className:'form-label'},'Pull Request URL'),React.createElement('input',{className:'form-input','aria-label':'Pull Request URL',placeholder:'https://github.com/owner/repo/pull/123',value:prUrl,onChange:function(e){setPrUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter')analyzePR();}})),
+                    React.createElement('div',{className:'form-group'},React.createElement('label',{className:'form-label'},'Pull Request URL'),React.createElement('input',{className:'form-input','aria-label':'Pull Request URL',placeholder:'https://truenas.example.com/forgejo/owner/repo/pulls/123',value:prUrl,onChange:function(e){setPrUrl(e.target.value);},onKeyDown:function(e){if(e.key==='Enter')analyzePR();}})),
                     React.createElement('button',{className:'top-btn primary','aria-label':'Analyze Pull Request',onClick:analyzePR,style:{marginBottom:16,width:'100%'}},'🔍 Analyze PR Impact'),
                     prData&&(function(){
                         var risk = calcPRRisk(prData, data);
@@ -4580,46 +4451,22 @@ function App(){
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},'🔑'),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Your Token Stays Local'),React.createElement('div',{className:'privacy-text'},'Your GitHub token is stored only in your browser\'s memory. It\'s never saved, logged, or transmitted anywhere except directly to GitHub\'s API.'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Your Token Stays Local'),React.createElement('div',{className:'privacy-text'},'Your Forgejo token is stored only in your browser\'s memory. It\'s never saved, logged, or transmitted anywhere except directly to your Forgejo server.'))
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},'📡'),
-                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Direct API Calls'),React.createElement('div',{className:'privacy-text'},'All GitHub API calls go directly from your browser to api.github.com. We have no proxy, no middleware, no way to intercept your data.'))
+                        React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Direct API Calls'),React.createElement('div',{className:'privacy-text'},'All remote API calls go directly from your browser to your Forgejo instance. We have no proxy, no middleware, no way to intercept your data.'))
                     ),
                     React.createElement('div',{className:'privacy-item'},
                         React.createElement('div',{className:'privacy-icon'},'🗑️'),
                         React.createElement('div',null,React.createElement('div',{className:'privacy-title'},'Nothing Persisted'),React.createElement('div',{className:'privacy-text'},'Close the tab and everything is gone. No cookies, no local storage, no tracking. Check the source code - it\'s all in one HTML file!'))
                     ),
                     React.createElement('div',{style:{marginTop:16,padding:12,background:'var(--accbg)',borderRadius:8,fontSize:10,color:'var(--t1)'}},
-                        '💡 Tip: Create a ',React.createElement('a',{href:'https://github.com/settings/tokens',target:'_blank',rel:'noopener',style:{color:'var(--acc)'}},'Personal Access Token'),' with only "public_repo" scope for extra peace of mind when analyzing public repositories.'
+                        '💡 Tip: create a Forgejo access token with repository read access when you want to analyze private repos.'
                     )
                 ),
                 React.createElement('div',{className:'modal-footer'},
                     React.createElement('button',{className:'top-btn primary',onClick:function(){setShowPrivacy(false);}},'Got it!')
-                )
-            )
-        ),
-        showKeyModal&&React.createElement('div',{className:'modal-overlay',onClick:function(){setShowKeyModal(false);}},
-            React.createElement('div',{className:'modal key-modal',onClick:function(e){e.stopPropagation();}},
-                React.createElement('div',{className:'modal-header'},React.createElement('div',{className:'modal-title'},'🔐 GitHub App Private Key'),React.createElement('button',{className:'modal-close',onClick:function(){setShowKeyModal(false);}},'×')),
-                React.createElement('div',{className:'modal-body'},
-                    React.createElement('div',{className:'key-info'},
-                        'Paste the private key from your GitHub App. This key is stored only in memory and never leaves your browser.',
-                        React.createElement('br'),React.createElement('br'),
-                        'To get a private key:',React.createElement('br'),
-                        '1. Go to GitHub → Settings → Developer settings → GitHub Apps',React.createElement('br'),
-                        '2. Select your app → Generate a private key',React.createElement('br'),
-                        '3. Open the downloaded ',React.createElement('code',null,'.pem'),' file and paste its contents below'
-                    ),
-                    React.createElement('div',{className:'form-group'},
-                        React.createElement('label',{className:'form-label'},'Private Key (PEM format)'),
-                        React.createElement('textarea',{className:'form-input',placeholder:'-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----',value:privateKey,onChange:function(e){setPrivateKey(e.target.value);},rows:10})
-                    )
-                ),
-                React.createElement('div',{className:'modal-footer'},
-                    privateKey&&React.createElement('button',{className:'top-btn',onClick:function(){setPrivateKey('');},style:{marginRight:'auto'}},'Clear Key'),
-                    React.createElement('button',{className:'top-btn',onClick:function(){setShowKeyModal(false);}},'Cancel'),
-                    React.createElement('button',{className:'top-btn primary',onClick:function(){setShowKeyModal(false);}},'Save')
                 )
             )
         ),

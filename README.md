@@ -4,7 +4,7 @@
 
 ### Visualize Your Codebase Architecture in Seconds
 
-**Zero setup. No installation. Just paste a GitHub URL.**
+**Zero setup. No build step. Analyze Forgejo repos or local folders interactively.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
@@ -19,7 +19,7 @@
 
 ## Why CodeFlow?
 
-Ever opened a new codebase and felt completely lost? **CodeFlow** turns any GitHub repository or local codebase into an interactive architecture map in seconds.
+Ever opened a new codebase and felt completely lost? **CodeFlow** turns any Forgejo repository or local codebase into an interactive architecture map in seconds.
 
 - **No installation required** — runs entirely in your browser
 - **No data collection** — your code never leaves your machine
@@ -72,7 +72,7 @@ Color files by commit frequency to see which parts of your codebase are most act
 Paste a PR URL to see exactly which files it affects and calculate the blast radius of proposed changes.
 
 ### 💻 **Local File Analysis**
-Analyze code directly from your computer without uploading to GitHub:
+Analyze code directly from your computer without uploading to Forgejo:
 - **Privacy First:** Your code never leaves your machine
 - **Offline Support:** Works without internet connection
 - **Drag & Drop:** Simply drag files or folders to analyze
@@ -86,21 +86,30 @@ Analyze code directly from your computer without uploading to GitHub:
 **Your code stays on your machine.** CodeFlow:
 
 - ✅ Runs 100% in the browser
-- ✅ Makes API calls directly from your browser to GitHub
-- ✅ Never stores your code or tokens
-- ✅ Works with private repos (just add your token locally)
+- ✅ Makes API calls directly to Forgejo or through your own TrueNAS proxy
+- ✅ Never sends code to a third-party backend
+- ✅ Supports private repos with either a local token or server-side proxy auth
 - ✅ No analytics or tracking
 
-Your GitHub token (if used) is only stored in your browser's memory and is cleared when you close the tab.
+In standalone browser mode, your Forgejo token stays in browser memory only. In the TrueNAS deployment, nginx can inject a server-side Forgejo token so users do not need to paste credentials into the UI.
 
 ---
 
 ## Quick Start
 
-### Option 1: Use Online (Recommended)
-Just visit [CodeFlow](https://codeflow-five.vercel.app/) and paste any GitHub URL.
+### Option 1: Run It on TrueNAS SCALE
 
-### Option 2: Self-Host
+For private Forgejo repos on the same NAS, use the native TrueNAS custom app deployment:
+
+```bash
+./deploy/truenas/deploy_custom_app.sh
+```
+
+That deploys a single `nginx` app, serves CodeFlow on port `30146`, and proxies Forgejo API calls through `/forgejo-api` with optional server-side token injection.
+
+See [deploy/truenas/README.md](deploy/truenas/README.md) for the deployment details.
+
+### Option 2: Self-Host as Static Files
 ```bash
 # Clone the repo
 git clone https://github.com/braedonsaunders/codeflow.git
@@ -112,7 +121,7 @@ open index.html
 No build process. No dependencies. No npm install. **It's just one HTML file.**
 
 ### Option 3: Analyze Local Files
-You can now analyze code directly from your local machine without uploading to GitHub:
+You can now analyze code directly from your local machine without uploading to Forgejo:
 
 1. Open CodeFlow in your browser
 2. Click the "📁 Local Files" button
@@ -129,16 +138,25 @@ You can now analyze code directly from your local machine without uploading to G
 
 ## Usage
 
-### Public Repositories
+### Forgejo Repositories
 ```
-Just paste: facebook/react
-Or full URL: https://github.com/facebook/react
+Paste a full Forgejo repo URL, or use owner/repo with your Forgejo base URL
+Example: https://truenas.example.com/forgejo/team/project
 ```
 
 ### Private Repositories
-1. Create a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` scope
-2. Paste it in the Token field
-3. Analyze your private repos
+1. Paste the repo URL, for example `http://192.168.1.134:30142/mmarinucci/TaxonoMate.git`
+2. Choose one auth mode:
+   - `Server Auth` when running behind the TrueNAS proxy
+   - `Token` when using a Forgejo personal access token
+3. Click `Analyze`
+
+### TrueNAS App Flow
+1. Deploy with `./deploy/truenas/deploy_custom_app.sh`
+2. Open `http://<truenas-host>:30146/`
+3. Paste a Forgejo repo URL
+4. Leave auth on `Server Auth` if the app is configured with a server-side token
+5. Analyze private repos without pasting credentials into the browser
 
 ### Local Files
 Click the "📁 Local Files" button to analyze code from your computer:
@@ -236,36 +254,24 @@ CodeFlow extracts functions and analyzes dependencies for:
 
 ---
 
-## API Limits
+## API Access
 
-GitHub API has rate limits:
-- **Without token:** 60 requests/hour
-- **With Personal Access Token:** 5,000 requests/hour
-- **With GitHub App:** 5,000 requests/hour per installation
+CodeFlow supports two remote access modes:
+
+- Direct browser-to-Forgejo API calls
+- TrueNAS reverse-proxy access through `/forgejo-api`
 
 ### Authentication Methods
 
-#### Personal Access Token (PAT)
-1. Create a [GitHub Personal Access Token](https://github.com/settings/tokens) with `repo` scope
+#### Server Auth
+- Intended for the TrueNAS deployment in `deploy/truenas/`
+- nginx injects the Forgejo token on proxied `/forgejo-api` requests
+- The browser never sees the token
+
+#### Forgejo Access Token
+1. Create a Forgejo access token with repository read access
 2. Paste it in the Token field
 3. Analyze your private repos
-
-#### GitHub App Authentication
-For teams and organizations, GitHub App provides better security and higher rate limits:
-
-1. Create a [GitHub App](https://github.com/settings/apps) with repository permissions
-2. Install the app on your organization or personal account
-3. Generate an installation access token
-4. Paste the token in the Token field
-
-**Benefits of GitHub App:**
-- ✅ Fine-grained permissions control
-- ✅ Revocable access per installation
-- ✅ Higher rate limits (5,000 requests/hour)
-- ✅ Audit logging and security monitoring
-- ✅ No need to share personal credentials
-
-For larger repositories or team usage, we recommend using GitHub App authentication.
 
 ---
 
@@ -276,7 +282,7 @@ For larger repositories or team usage, we recommend using GitHub App authenticat
 │                   CodeFlow                      │
 ├─────────────────────────────────────────────────┤
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
-│  │  Parser  │  │  GitHub  │  │    D3    │       │
+│  │  Parser  │  │ Forgejo  │  │    D3    │       │
 │  │  Module  │  │   API    │  │  Graph   │       │
 │  └──────────┘  └──────────┘  └──────────┘       │
 │        │              │              │          │
@@ -317,10 +323,10 @@ We love contributions! Here's how:
 ## FAQ
 
 **Q: How does it work without a backend?**
-> CodeFlow runs entirely in your browser. It calls the GitHub API directly from your browser and processes everything client-side.
+> CodeFlow runs entirely in your browser. It calls the Forgejo API directly from your browser and processes everything client-side.
 
 **Q: Is my code safe?**
-> Yes. Your code is fetched directly from GitHub to your browser. Nothing is sent to any server we control. Check the source — it's one file!
+> Yes. Your code is fetched directly from Forgejo to your browser. Nothing is sent to any server we control. Check the source — it's one file!
 
 **Q: Can I use it offline?**
 > Yes! With the new Local Files feature, you can analyze code from your computer without any internet connection. Just click the "📁 Local Files" button and select your files. All processing happens entirely in your browser.
