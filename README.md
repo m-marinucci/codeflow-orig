@@ -158,6 +158,69 @@ Example: https://truenas.example.com/forgejo/team/project
 4. Leave auth on `Server Auth` if the app is configured with a server-side token
 5. Analyze private repos without pasting credentials into the browser
 
+### CLI Diagnostics For Codex Skills
+
+CodeFlow now exposes its diagnostics through a local CLI so Codex skills can shell out and consume structured JSON instead of scraping the UI.
+
+#### Analyze a local path
+```bash
+node scripts/codeflow-report.cjs path /absolute/path/to/project --json
+```
+
+#### Keep the payload small for skills
+```bash
+node scripts/codeflow-report.cjs path /absolute/path/to/project \
+  --json \
+  --sections summary,securityIssues,suggestions
+```
+
+#### Analyze a Forgejo repo directly
+```bash
+node scripts/codeflow-report.cjs repo \
+  http://192.168.1.134:30142/mmarinucci/TaxonoMate.git \
+  --auth auto \
+  --json \
+  --sections summary,patterns,securityIssues,suggestions
+```
+
+`--auth auto` will use a token from:
+- `--token`
+- `--token-env`
+- `FORGEJO_TOKEN`
+- `FJ_TOKEN`
+- macOS Keychain service `TrueNAS-Forgejo-Token`
+
+#### Use a server-side proxy instead of a local token
+```bash
+node scripts/codeflow-report.cjs repo \
+  http://192.168.1.134:30142/mmarinucci/TaxonoMate.git \
+  --auth server \
+  --api-base-url http://192.168.1.134:30146/forgejo-api \
+  --json \
+  --sections summary,suggestions
+```
+
+That mode is useful when the TrueNAS app already injects the Forgejo token and you want the CLI to reuse the same proxy path.
+
+#### Opt-in remote smoke test for pre-commit
+```bash
+node scripts/codeflow-smoke.cjs aichemist --json --sections summary > /dev/null
+```
+
+That target currently points at:
+
+```text
+http://192.168.1.134:30142/mmarinucci/AIchemist.git
+```
+
+It is intended as a real Forgejo smoke target for this environment, not as part of the default fast unit test path.
+
+Example `.git/hooks/pre-commit` snippet:
+```bash
+#!/bin/sh
+node scripts/codeflow-smoke.cjs aichemist --json --sections summary > /dev/null || exit 1
+```
+
 ### Local Files
 Click the "📁 Local Files" button to analyze code from your computer:
 - **Folder Analysis:** Select a folder to analyze all supported files recursively
