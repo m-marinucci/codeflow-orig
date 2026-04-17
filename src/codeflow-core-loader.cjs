@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const GitignoreMatcher = require('./gitignore-matcher.js');
 
 let cachedCore = null;
 
@@ -34,6 +35,7 @@ function createSandbox() {
     URL,
     URLSearchParams,
     Buffer,
+    GitignoreMatcher,
     atob(value) {
       return Buffer.from(value, 'base64').toString('utf8');
     },

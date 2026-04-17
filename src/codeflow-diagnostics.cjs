@@ -3,6 +3,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { loadCodeflowCore } = require('./codeflow-core-loader.cjs');
 const forgejoProvider = require('./forgejo-provider.js');
+const GitignoreMatcher = require('./gitignore-matcher.js');
 
 function getSecurityValue(serviceName) {
   if (!serviceName) {
@@ -584,15 +585,51 @@ function analyzePreparedFiles(preparedFiles, sourceLabel) {
   return finalizeDataObject(analyzed, allFns, connections, fnStats, sourceLabel);
 }
 
-function listLocalFiles(rootPath, parser, ignoreSet, basePath, accumulator) {
+function collectLocalGitignoreEntries(rootPath, ignoreSet, basePath, entries) {
+  const stats = fs.statSync(rootPath);
+  if (!stats.isDirectory()) {
+    return;
+  }
+
+  const gitignorePath = path.join(rootPath, '.gitignore');
+  if (fs.existsSync(gitignorePath) && fs.statSync(gitignorePath).isFile()) {
+    try {
+      const relativeBase = path.relative(basePath, rootPath);
+      entries.push({
+        basePath: relativeBase === '.' ? '' : relativeBase,
+        content: fs.readFileSync(gitignorePath, 'utf8'),
+      });
+    } catch (error) {
+      // Ignore unreadable .gitignore files and continue scanning.
+    }
+  }
+
+  fs.readdirSync(rootPath, { withFileTypes: true }).forEach((entry) => {
+    if (!entry.isDirectory()) {
+      return;
+    }
+    if (ignoreSet.has(entry.name)) {
+      return;
+    }
+    collectLocalGitignoreEntries(path.join(rootPath, entry.name), ignoreSet, basePath, entries);
+  });
+}
+
+function listLocalFiles(rootPath, parser, ignoreSet, basePath, matcher, accumulator) {
   const stats = fs.statSync(rootPath);
   if (stats.isFile()) {
     const fileName = path.basename(rootPath);
+    if (fileName === '.gitignore') {
+      return;
+    }
     if (!parser.isIncluded(fileName)) {
       return;
     }
 
     const relativePath = basePath ? path.relative(basePath, rootPath) : fileName;
+    if (matcher && matcher.ignores(relativePath, false)) {
+      return;
+    }
     const folderPath = path.dirname(relativePath);
     let content = '';
     try {
@@ -622,12 +659,16 @@ function listLocalFiles(rootPath, parser, ignoreSet, basePath, accumulator) {
     }
 
     const entryPath = path.join(rootPath, entry.name);
+    const relativeEntryPath = path.relative(basePath, entryPath);
+    if (matcher && matcher.ignores(relativeEntryPath, entry.isDirectory())) {
+      return;
+    }
     if (entry.isDirectory()) {
-      listLocalFiles(entryPath, parser, ignoreSet, basePath, accumulator);
+      listLocalFiles(entryPath, parser, ignoreSet, basePath, matcher, accumulator);
       return;
     }
 
-    listLocalFiles(entryPath, parser, ignoreSet, basePath, accumulator);
+    listLocalFiles(entryPath, parser, ignoreSet, basePath, matcher, accumulator);
   });
 }
 
@@ -637,8 +678,22 @@ function analyzePath(targetPath) {
   const stats = fs.statSync(absolutePath);
   const basePath = stats.isDirectory() ? absolutePath : path.dirname(absolutePath);
   const preparedFiles = [];
+  const gitignoreEntries = [];
 
-  listLocalFiles(absolutePath, Parser, IGNORE, basePath, preparedFiles);
+  if (stats.isDirectory()) {
+    collectLocalGitignoreEntries(absolutePath, IGNORE, basePath, gitignoreEntries);
+  } else {
+    const gitignorePath = path.join(basePath, '.gitignore');
+    if (fs.existsSync(gitignorePath)) {
+      gitignoreEntries.push({
+        basePath: '',
+        content: fs.readFileSync(gitignorePath, 'utf8'),
+      });
+    }
+  }
+  const matcher = GitignoreMatcher.buildMatcher(gitignoreEntries);
+
+  listLocalFiles(absolutePath, Parser, IGNORE, basePath, matcher, preparedFiles);
 
   if (!preparedFiles.length) {
     throw new Error(`No analyzable files found in ${absolutePath}`);
@@ -715,6 +770,26 @@ async function analyzeRepo(repoInput, options) {
   }
 
   const { Parser, IGNORE } = loadCodeflowCore();
+  const gitignoreEntries = [];
+  for (const item of tree.tree) {
+    if (item.type !== 'blob' || item.path.split('/').pop() !== '.gitignore' || !item.sha) {
+      continue;
+    }
+    const blob = await client.fetchJson(
+      `/repos/${encodeURIComponent(repoInfo.owner)}/${encodeURIComponent(
+        repoInfo.repo
+      )}/git/blobs/${encodeURIComponent(item.sha)}`
+    );
+    if (!blob || !blob.content) {
+      continue;
+    }
+    gitignoreEntries.push({
+      basePath:
+        item.path.indexOf('/') >= 0 ? item.path.slice(0, item.path.lastIndexOf('/')) : '',
+      content: Buffer.from(blob.content, 'base64').toString('utf8'),
+    });
+  }
+  const matcher = GitignoreMatcher.buildMatcher(gitignoreEntries);
   const preparedFiles = [];
   const maxFiles = config.maxFiles || 750;
 
@@ -725,6 +800,9 @@ async function analyzeRepo(repoInput, options) {
     if (item.type !== 'blob') {
       continue;
     }
+    if (item.path.split('/').pop() === '.gitignore') {
+      continue;
+    }
 
     const pathParts = item.path.split('/');
     if (pathParts.slice(0, -1).some((part) => IGNORE.has(part))) {
@@ -733,6 +811,9 @@ async function analyzeRepo(repoInput, options) {
 
     const fileName = pathParts[pathParts.length - 1];
     if (!Parser.isIncluded(fileName)) {
+      continue;
+    }
+    if (matcher.ignores(item.path, false)) {
       continue;
     }
 

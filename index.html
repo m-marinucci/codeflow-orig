@@ -428,6 +428,7 @@ body{font-family:'JetBrains Mono',monospace;background:var(--bg0);color:var(--t0
 <div id="root"></div>
 <script src="./config.js"></script>
 <script src="./src/forgejo-provider.js"></script>
+<script src="./src/gitignore-matcher.js"></script>
 <script type="text/babel">
 const{useState,useEffect,useRef,useMemo,useCallback}=React;
 const COLORS=['#4d9fff','#a78bfa','#22d3ee','#00ff9d','#ff9f43','#ec4899','#ff5f5f','#84cc16'];
@@ -1849,6 +1850,9 @@ var Forgejo={
         var path='/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/contents/'+this.encodePath(p);
         return this.fetch(path).then(function(d){return d.content?atob(d.content):null;}).catch(function(){return null;});
     },
+    getBlob:function(o,r,sha){
+        return this.fetch('/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/git/blobs/'+encodeURIComponent(sha)).then(function(d){return d&&d.content?atob(d.content):null;}).catch(function(){return null;});
+    },
     getCommits:function(o,r,path,limit){
         var query='?limit='+(limit||30)+(path?'&path='+encodeURIComponent(path):'');
         return this.fetch('/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/commits'+query).catch(function(){return[];});
@@ -1881,20 +1885,35 @@ var Forgejo={
             return self.fetch('/repos/'+encodeURIComponent(o)+'/'+encodeURIComponent(r)+'/git/trees/'+encodeURIComponent(branch)+'?recursive=1');
         }).then(function(tree){
             if(!tree.tree)throw new Error('Invalid tree response');
+            var gitignoreEntries=[];
+            var gitignorePromises=tree.tree.filter(function(i){return i.type==='blob'&&i.sha&&i.path.split('/').pop()==='.gitignore';}).map(function(i){
+                return self.getBlob(o,r,i.sha).then(function(content){
+                    if(!content)return;
+                    gitignoreEntries.push({
+                        basePath:i.path.includes('/')?i.path.substring(0,i.path.lastIndexOf('/')):'',
+                        content:content
+                    });
+                });
+            });
+            return Promise.all(gitignorePromises).then(function(){
+            var matcher=window.GitignoreMatcher?window.GitignoreMatcher.buildMatcher(gitignoreEntries):null;
             var f=[];
             tree.tree.forEach(function(i){
                 if(i.type!=='blob')return;
                 var name=i.path.includes('/')?i.path.substring(i.path.lastIndexOf('/')+1):i.path;
+                if(name==='.gitignore')return;
                 // Check if in ignored directory
                 var pathParts=i.path.split('/');
                 var ignored=pathParts.slice(0,-1).some(function(part){return IGNORE.has(part);});
                 if(ignored)return;
                 if(!Parser.isIncluded(name))return;
+                if(matcher&&matcher.ignores(i.path,false))return;
                 var folder=i.path.includes('/')?i.path.substring(0,i.path.lastIndexOf('/')):'root';
                 f.push({path:i.path,name:name,folder:folder,size:i.size||0,isCode:Parser.isCode(name)});
             });
             if(cb)cb('Found '+f.length+' files');
             return f;
+            });
         });
     },
     // Fallback: recursive scan using Contents API (many requests)
@@ -2527,17 +2546,50 @@ function App(){
         var files=[];
         var SOFT_LIMIT=500,HARD_LIMIT=2000;
         var fileCount=0;
+        var gitignoreEntries=[];
+
+        async function collectGitignores(handle,currentPath){
+            var localGitignore=null;
+            for await (const entry of handle.values()){
+                if(entry.kind==='file'&&entry.name==='.gitignore'){
+                    localGitignore=entry;
+                    break;
+                }
+            }
+            if(localGitignore){
+                try{
+                    var gitignoreFile=await localGitignore.getFile();
+                    gitignoreEntries.push({
+                        basePath:currentPath||'',
+                        content:await gitignoreFile.text()
+                    });
+                }catch(e){}
+            }
+            for await (const entry of handle.values()){
+                if(entry.kind==='directory'){
+                    if(!IGNORE.has(entry.name)&&!entry.name.endsWith('.egg-info')){
+                        var entryPath=currentPath?currentPath+'/'+entry.name:entry.name;
+                        await collectGitignores(entry,entryPath);
+                    }
+                }
+            }
+        }
+
+        await collectGitignores(dirHandle,'');
+        var matcher=window.GitignoreMatcher?window.GitignoreMatcher.buildMatcher(gitignoreEntries):null;
 
         async function readDirectory(handle, currentPath){
             for await (const entry of handle.values()){
                 if(fileCount>=HARD_LIMIT)break;
                 var entryPath=currentPath?currentPath+'/'+entry.name:entry.name;
+                if(matcher&&matcher.ignores(entryPath,entry.kind==='directory'))continue;
                 if(entry.kind==='directory'){
                     if(!IGNORE.has(entry.name)&&!entry.name.endsWith('.egg-info')){
                         await readDirectory(entry,entryPath);
                     }
                 }else if(entry.kind==='file'){
                     var name=entry.name;
+                    if(name==='.gitignore')continue;
                     if(!Parser.isIncluded(name))continue;
                     var folder=currentPath||'root';
                     files.push({path:entryPath,name:name,folder:folder,size:0,isCode:Parser.isCode(name)});

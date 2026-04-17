@@ -77,6 +77,7 @@ Analyze code directly from your computer without uploading to Forgejo:
 - **Offline Support:** Works without internet connection
 - **Drag & Drop:** Simply drag files or folders to analyze
 - **Folder Scanning:** Recursively analyze entire project structures
+- **Git-aware Defaults:** Respects `.gitignore` entries automatically in the UI and CLI
 - **Instant Results:** All processing happens in your browser
 
 ---
@@ -126,7 +127,7 @@ You can now analyze code directly from your local machine without uploading to F
 1. Open CodeFlow in your browser
 2. Click the "📁 Local Files" button
 3. Select the folder or files you want to analyze
-4. CodeFlow will process them entirely in your browser
+4. CodeFlow will process them entirely in your browser, skipping files matched by the repo's `.gitignore`
 
 **Perfect for:**
 - Private projects you don't want to upload
@@ -143,6 +144,8 @@ You can now analyze code directly from your local machine without uploading to F
 Paste a full Forgejo repo URL, or use owner/repo with your Forgejo base URL
 Example: https://truenas.example.com/forgejo/team/project
 ```
+
+Remote repo scans also respect `.gitignore` entries from the target repository by default.
 
 ### Private Repositories
 1. Paste the repo URL, for example `http://192.168.1.134:30142/mmarinucci/TaxonoMate.git`
@@ -167,6 +170,8 @@ CodeFlow now exposes its diagnostics through a local CLI so Codex skills can she
 node scripts/codeflow-report.cjs path /absolute/path/to/project --json
 ```
 
+Local path analysis skips files and directories matched by the target repo's `.gitignore` by default.
+
 #### Keep the payload small for skills
 ```bash
 node scripts/codeflow-report.cjs path /absolute/path/to/project \
@@ -182,6 +187,8 @@ node scripts/codeflow-report.cjs repo \
   --json \
   --sections summary,patterns,securityIssues,suggestions
 ```
+
+Repo mode reads `.gitignore` files from the target repository and excludes matching paths automatically.
 
 `--auth auto` will use a token from:
 - `--token`
